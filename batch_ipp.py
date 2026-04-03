@@ -291,6 +291,133 @@ class TMExtractor:
             return {}
 
 
+# ==================== 侵权对比图生成 ====================
+def generate_comparison_image(screenshot_path: str, brand: str, save_dir: str, index: int) -> str:
+    """生成侵权对比图：截取页面关键区域 + 添加标注框"""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        print("[WARN] 缺少 Pillow，无法生成对比图")
+        return ""
+
+    if not screenshot_path or not os.path.exists(screenshot_path):
+        return ""
+
+    try:
+        img = Image.open(screenshot_path)
+        w, h = img.size
+
+        # 截取主要区域（商品信息和店铺名区域）
+        top_region = img.crop((0, 0, w, min(h // 2, 800)))
+
+        # 创建对比图（左侧：原始截图，右侧：标注版本）
+        comparison_w = w * 2 + 20
+        comparison_h = max(top_region.height, 300) + 80
+        comparison = Image.new('RGB', (comparison_w, comparison_h), color=(240, 240, 240))
+        comparison.paste(top_region, (0, 0))
+
+        # 右侧标注版本
+        annotated = top_region.copy()
+        draw = ImageDraw.Draw(annotated)
+
+        # 尝试加载字体（回退到默认）
+        try:
+            font_large = ImageFont.truetype("msyh.ttc", 20)
+            font_small = ImageFont.truetype("msyh.ttc", 14)
+        except:
+            font_large = ImageFont.load_default()
+            font_small = ImageFont.load_default()
+
+        # 添加红色标注框（店铺区域）
+        draw.rectangle([10, 40, w - 10, 100], outline=(220, 0, 0), width=3)
+        draw.rectangle([8, 38, w - 8, 102], outline=(255, 100, 100), width=1)
+        draw.text((15, 42), f"⚠ 侵权店铺：{brand}", fill=(220, 0, 0), font=font_small)
+
+        # 添加标题区域标注
+        title_h = min(h // 4, 200)
+        draw.rectangle([10, 100, w - 10, title_h], outline=(0, 100, 200), width=2)
+        draw.text((15, 105), "商品标题（含品牌关键词）", fill=(0, 80, 180), font=font_small)
+
+        # 合并到对比图右侧
+        comparison.paste(annotated, (w + 10, 0))
+
+        # 分割线
+        draw2 = ImageDraw.Draw(comparison)
+        draw2.line([w + 5, 0, w + 5, comparison_h], fill=(180, 180, 180), width=2)
+
+        # 添加文字标注
+        draw2.text((w // 2 - 80, top_region.height + 10), "原始截图", fill=(80, 80, 80), font=font_small)
+        draw2.text((w + w // 2 - 80, top_region.height + 10), "侵权标注", fill=(220, 0, 0), font=font_small)
+        draw2.text((20, comparison_h - 30),
+                   f"WOW English 侵权证据 #{index} | 未经授权使用品牌关键词",
+                   fill=(100, 100, 100), font=font_small)
+
+        out_path = os.path.join(save_dir, f"侵权对比图_{index:03d}.png")
+        comparison.save(out_path, quality=95)
+        return out_path
+    except Exception as e:
+        print(f"[WARN] 对比图生成失败: {e}")
+        return ""
+
+
+# ==================== 投诉理由生成 ====================
+def generate_complaint_text_jd(shop: str, title: str, url: str, matched_kw: str) -> str:
+    """生成京东 IP 投诉理由文本"""
+    return f"""投诉理由：
+我方是「WOW English」品牌版权方（商标权/著作权权利人）。
+
+经调查发现，商家「{shop}」（商品链接：{url}）在商品页面中存在以下侵权行为：
+
+1. 商品标题中使用了"WOW English"、"Steve English"、"史蒂夫英语"等我方品牌关键词，借我方品牌知名度进行销售；
+2. 该行为易使消费者产生混淆，误认为该商品与我方存在授权关系。
+
+上述行为涉嫌违反：
+- 《商标法》第五十七条第（二）项：未经许可在同一种商品上使用与注册商标近似的商标，容易导致混淆的；
+- 《反不正当竞争法》第六条：擅自使用他人有一定影响的市场主体名称等，引人误认为是他人商品。
+
+我方恳请京东平台依据《电子商务法》第四十五条，对上述侵权商品采取删除、屏蔽、断开链接等必要措施。
+
+我方可提供完整商标注册证及著作权登记证明。如有需要，请联系投诉方。"""
+
+
+def generate_complaint_text_tmall(shop: str, title: str, url: str, matched_kw: str) -> str:
+    """生成淘天 IPP 投诉理由文本"""
+    return f"""投诉理由：
+
+【权利人声明】
+我方为「WOW English」品牌的合法版权方，依法持有该品牌相关商标权及著作权。
+
+【侵权事实】
+商家「{shop}」（商品链接：{url}）销售的商品标题/详情页中，未经授权使用了"WOW English"、"史蒂夫英语"、"Steve English"、"English Singsing"等我方品牌关键词。
+
+商品标题：{title}
+
+【侵权类型】
+□ 商标侵权（未经授权使用他人注册商标）
+☑ 著作权侵权（盗用品牌动画角色形象/内容进行商业销售）
+
+【法律依据】
+1. 《商标法》第五十七条第（二）项：未经许可在同一种商品上使用与注册商标近似的商标，容易导致混淆的；
+2. 《著作权法》第五十二条：未经著作权人许可，复制、发行、通过信息网络向公众传播其作品的，构成侵权；
+3. 《电子商务法》第四十五条：电子商务平台经营者知道或者应当知道平台内经营者侵犯知识产权的，应当采取删除、屏蔽、断开链接、终止交易和服务等必要措施。
+
+【投诉诉求】
+恳请贵平台依据相关法律法规，对上述侵权商品立即采取删除、屏蔽、断开链接等必要措施，并视情况对侵权商家进行处罚。
+
+我方承诺所提交材料真实有效，并依法承担相应法律责任。"""
+
+
+def generate_complaint_text_pdd(shop: str, title: str, url: str, matched_kw: str) -> str:
+    """生成拼多多投诉理由文本"""
+    return f"""投诉声明：
+我方「WOW English」版权方发现，商家「{shop}」在拼多多平台销售的商品标题中，
+未经授权使用了"WOW English"、"Steve English"、"史蒂夫英语"等我方品牌关键词。
+商品链接：{url}
+商品标题：{title}
+该行为涉嫌构成商标侵权及著作权侵权。
+请依据《电子商务法》对侵权商品采取下架处理。"""
+
+
 # ==================== 截图管理 ====================
 class ScreenshotManager:
     def __init__(self, page: Page, save_dir: str, prefix: str = ""):
@@ -455,20 +582,23 @@ class IPPComplaintGenerator:
         lines.append("=" * 70)
 
         for i, r in enumerate(self.results, 1):
+            platform = r.get('platform', '')
             shop = r.get('shop_name', '未知店铺')
             title = r.get('title', '未知商品')
-            brand = COPYRIGHT_HOLDER
-            lines.append(f"""
-商品{i}投诉理由：
-您好，我方是「{brand}」的版权方。
-经调查发现，商家「{shop}」销售的商品标题/描述中使用了 WOW English 相关品牌关键词，
-涉嫌构成商标侵权及著作权侵权。
-商品链接：{r.get('url','')}
-商品标题：{title}
-请贵平台依据《电子商务法》第42-45条及《商标法》相关规定，
-对上述侵权商品采取删除、屏蔽、断开链接等必要措施。
-如有需要，我方可提供完整著作权登记证书及商标授权文件。
-""")
+            url = r.get('url', '')
+            matched = r.get('infringement_check', '')
+            kw = matched.split('匹配：')[1].rstrip('）') if '匹配：' in matched else ''
+
+            if '京东' in platform:
+                text = generate_complaint_text_jd(shop, title, url, kw)
+            elif '天猫' in platform or '淘宝' in platform:
+                text = generate_complaint_text_tmall(shop, title, url, kw)
+            elif '拼多多' in platform:
+                text = generate_complaint_text_pdd(shop, title, url, kw)
+            else:
+                text = generate_complaint_text_tmall(shop, title, url, kw)
+
+            lines.append(f"\n{'─'*60}\n商品 {i} 投诉理由（{platform}）\n{'─'*60}\n{text}")
 
         lines.append("=" * 70)
         lines.append(f"共 {len(self.results)} 件商品 | 生成时间：{date_str}")
@@ -538,6 +668,344 @@ class IPPComplaintGenerator:
 
         date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = os.path.join(self.save_dir, f"批量处理汇总_{date_str}.xlsx")
+        wb.save(filename)
+        return filename
+
+    def generate_ipp_form(self) -> str:
+        """生成 IPP 平台预填充表单（京东+淘天双平台）"""
+        wb = openpyxl.Workbook()
+
+        # === Sheet 1: 京东 IP 投诉表单 ===
+        ws_jd = wb.active
+        ws_jd.title = "京东IP投诉表单"
+
+        jd_title_fill = PatternFill(start_color="C41E3A", end_color="C41E3A", fill_type="solid")
+        jd_title_font = Font(bold=True, color="FFFFFF", size=14)
+        section_fill = PatternFill(start_color="FFD0D0", end_color="FFD0D0", fill_type="solid")
+        section_font = Font(bold=True, size=10)
+        field_fill = PatternFill(start_color="F5F5F5", end_color="F5F5F5", fill_type="solid")
+        value_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+        tip_font = Font(size=9, color="888888", italic=True)
+
+        # 京东表单
+        jd_fields = [
+            ("投诉方信息", ""),
+            ("投诉人/公司名称", COPYRIGHT_HOLDER),
+            ("联系方式", "请填写您的邮箱/电话"),
+            ("证件号码", "请填写营业执照统一社会信用代码"),
+            ("", ""),
+            ("权利信息", ""),
+            ("权利类型", RIGHTS_TYPE),
+            ("权利名称/注册号", "请填写WOW English商标注册号"),
+            ("权利证书上传", "需上传：商标注册证扫描件（PDF/JPG）"),
+            ("著作权登记证明", "需上传：著作权登记证书（如有）"),
+            ("", ""),
+            ("侵权信息", ""),
+            ("被投诉平台", "京东"),
+            ("涉嫌侵权商品数量", str(len(self.results)) + " 件"),
+        ]
+
+        row = 1
+        ws_jd.column_dimensions['A'].width = 22
+        ws_jd.column_dimensions['B'].width = 50
+        ws_jd.column_dimensions['C'].width = 40
+
+        # 标题行
+        ws_jd.merge_cells('A1:C1')
+        c = ws_jd['A1']
+        c.value = "京东知识产权保护平台 - 投诉表单（预填充版）"
+        c.fill = jd_title_fill
+        c.font = jd_title_font
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        ws_jd.row_dimensions[1].height = 35
+
+        row = 2
+        for label, value in jd_fields:
+            if label == "":
+                row += 1
+                continue
+            is_section = value == ""
+            if is_section:
+                ws_jd.merge_cells(f'A{row}:C{row}')
+                c = ws_jd.cell(row=row, column=1, value=label)
+                c.fill = section_fill
+                c.font = section_font
+                c.alignment = Alignment(horizontal="left", vertical="center")
+                ws_jd.row_dimensions[row].height = 22
+            else:
+                c_label = ws_jd.cell(row=row, column=1, value=label)
+                c_label.fill = field_fill
+                c_label.font = Font(bold=True, size=10)
+                c_label.alignment = Alignment(horizontal="left", vertical="center")
+                c_value = ws_jd.cell(row=row, column=2, value=value)
+                c_value.fill = value_fill
+                c_value.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+                ws_jd.row_dimensions[row].height = 20
+
+                # 提示列
+                if "上传" in label or "填写" in value:
+                    c_tip = ws_jd.cell(row=row, column=3, value=value)
+                    c_tip.fill = PatternFill(start_color="FFF9E6", end_color="FFF9E6", fill_type="solid")
+                    c_tip.font = tip_font
+            row += 1
+
+        # 侵权商品列表（从第row行开始）
+        row += 1
+        ws_jd.merge_cells(f'A{row}:C{row}')
+        c = ws_jd.cell(row=row, column=1, value="【涉嫌侵权商品列表】（自动抓取）")
+        c.fill = section_fill
+        c.font = section_font
+        row += 1
+
+        # 表头
+        headers_jd = ["序号", "商品链接", "店铺名称", "商品标题", "侵权关键词"]
+        col_widths_jd = [6, 50, 25, 40, 30]
+        hdr_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        hdr_font = Font(bold=True, color="FFFFFF", size=10)
+
+        # 调整列数
+        for ci, (h, w) in enumerate(zip(headers_jd, col_widths_jd), 1):
+            ws_jd.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = w
+            c = ws_jd.cell(row=row, column=ci, value=h)
+            c.fill = hdr_fill
+            c.font = hdr_font
+            c.alignment = Alignment(horizontal="center")
+        ws_jd.row_dimensions[row].height = 22
+        row += 1
+
+        for i, r in enumerate(self.results, 1):
+            infringement = r.get('infringement_check', '')
+            matched = ''
+            if '匹配：' in infringement:
+                matched = infringement.split('匹配：')[1].rstrip('）')
+            row_data = [str(i), r.get('url', ''), r.get('shop_name', ''),
+                       r.get('title', '')[:50], matched]
+            row_fill = PatternFill(
+                start_color="FFEEEE" if "是" in infringement else "FFFFFF",
+                end_color="FFEEEE" if "是" in infringement else "FFFFFF",
+                fill_type="solid"
+            )
+            for ci, val in enumerate(row_data, 1):
+                c = ws_jd.cell(row=row, column=ci, value=val)
+                c.fill = row_fill
+                c.alignment = Alignment(wrap_text=True, vertical="top")
+                c.font = Font(size=9)
+            ws_jd.row_dimensions[row].height = 30
+            row += 1
+
+        # === Sheet 2: 淘天 IPP 投诉表单 ===
+        ws_ipp = wb.create_sheet("淘天IPP投诉表单")
+        ws_ipp.merge_cells('A1:E1')
+        c = ws_ipp['A1']
+        c.value = "淘天集团 IPP 平台 - 投诉表单（预填充版）"
+        c.fill = jd_title_fill
+        c.font = jd_title_font
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        ws_ipp.row_dimensions[1].height = 35
+
+        ipp_title_fill = PatternFill(start_color="FF6600", end_color="FF6600", fill_type="solid")
+        ipp_section = PatternFill(start_color="FFE0CC", end_color="FFE0CC", fill_type="solid")
+
+        ipp_fields = [
+            ("投诉方信息", ""),
+            ("单位/姓名", COPYRIGHT_HOLDER),
+            ("联系方式", "请填写邮箱"),
+            ("证件号码", "请填写统一社会信用代码/身份证号"),
+            ("投诉方类型", "权利人本人"),
+            ("", ""),
+            ("权利信息", ""),
+            ("权利类型", "商标权 + 著作权"),
+            ("注册商标名称", "WOW English / Steve English / 史蒂夫英语"),
+            ("商标注册号", "请填写实际注册号"),
+            ("权利证明文件", "需上传：商标注册证扫描件"),
+            ("著作权证明文件", "需上传：作品登记证书（如有）"),
+            ("", ""),
+            ("投诉信息", ""),
+            ("投诉平台", "天猫 / 淘宝 / 1688"),
+            ("涉嫌侵权商品数量", str(len(self.results)) + " 件"),
+            ("侵权类型", "商标侵权 + 著作权侵权"),
+        ]
+
+        ws_ipp.column_dimensions['A'].width = 22
+        ws_ipp.column_dimensions['B'].width = 35
+        ws_ipp.column_dimensions['C'].width = 20
+        ws_ipp.column_dimensions['D'].width = 30
+        ws_ipp.column_dimensions['E'].width = 35
+
+        row = 2
+        for label, value in ipp_fields:
+            if label == "":
+                row += 1
+                continue
+            is_section = value == ""
+            if is_section:
+                ws_ipp.merge_cells(f'A{row}:E{row}')
+                c = ws_ipp.cell(row=row, column=1, value=label)
+                c.fill = ipp_section
+                c.font = section_font
+                ws_ipp.row_dimensions[row].height = 22
+            else:
+                c_label = ws_ipp.cell(row=row, column=1, value=label)
+                c_label.fill = field_fill
+                c_label.font = Font(bold=True, size=10)
+                c_label.alignment = Alignment(horizontal="left", vertical="center")
+
+                ws_ipp.merge_cells(f'B{row}:C{row}')
+                c_val = ws_ipp.cell(row=row, column=2, value=value)
+                c_val.fill = value_fill
+                c_val.alignment = Alignment(horizontal="left", vertical="center")
+
+                if "上传" in label or "填写" in value or "请填写" in value:
+                    ws_ipp.merge_cells(f'D{row}:E{row}')
+                    c_tip = ws_ipp.cell(row=row, column=4, value=value)
+                    c_tip.fill = PatternFill(start_color="FFF9E6", end_color="FFF9E6", fill_type="solid")
+                    c_tip.font = tip_font
+                ws_ipp.row_dimensions[row].height = 20
+            row += 1
+
+        row += 1
+        ws_ipp.merge_cells(f'A{row}:E{row}')
+        c = ws_ipp.cell(row=row, column=1, value="【涉嫌侵权商品列表】（自动抓取）")
+        c.fill = ipp_section
+        c.font = section_font
+        row += 1
+
+        headers_ipp = ["序号", "平台", "商品链接", "店铺名称", "商品标题（已脱敏）"]
+        col_widths_ipp = [6, 10, 50, 25, 40]
+        for ci, (h, w) in enumerate(zip(headers_ipp, col_widths_ipp), 1):
+            ws_ipp.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = w
+            c = ws_ipp.cell(row=row, column=ci, value=h)
+            c.fill = hdr_fill
+            c.font = hdr_font
+            c.alignment = Alignment(horizontal="center")
+        ws_ipp.row_dimensions[row].height = 22
+        row += 1
+
+        for i, r in enumerate(self.results, 1):
+            row_data = [str(i), r.get('platform', ''), r.get('url', ''),
+                       r.get('shop_name', ''), r.get('title', '')[:40]]
+            row_fill = PatternFill(
+                start_color="FFEEEE" if "是" in r.get('infringement_check', '') else "FFFFFF",
+                end_color="FFEEEE" if "是" in r.get('infringement_check', '') else "FFFFFF",
+                fill_type="solid"
+            )
+            for ci, val in enumerate(row_data, 1):
+                c = ws_ipp.cell(row=row, column=ci, value=val)
+                c.fill = row_fill
+                c.alignment = Alignment(wrap_text=True, vertical="top")
+                c.font = Font(size=9)
+            ws_ipp.row_dimensions[row].height = 30
+            row += 1
+
+        # === Sheet 3: 投诉理由批量生成 ===
+        ws_txt = wb.create_sheet("投诉理由(直接复制)")
+        ws_txt.column_dimensions['A'].width = 100
+
+        hdr_fill_txt = PatternFill(start_color="2E7D32", end_color="2E7D32", fill_type="solid")
+        for col in range(1, 3):
+            c = ws_txt.cell(row=1, column=col, value="投诉理由（直接复制到 IPP 平台）" if col == 1 else "所属平台")
+            c.fill = hdr_fill_txt
+            c.font = Font(bold=True, color="FFFFFF", size=12)
+            c.alignment = Alignment(horizontal="center", vertical="center")
+        ws_txt.row_dimensions[1].height = 30
+        ws_txt.column_dimensions['B'].width = 15
+
+        for i, r in enumerate(self.results, 2):
+            platform = r.get('platform', '')
+            shop = r.get('shop_name', '')
+            title = r.get('title', '')
+            url = r.get('url', '')
+            matched = r.get('infringement_check', '')
+            kw = matched.split('匹配：')[1].rstrip('）') if '匹配：' in matched else ''
+
+            if '京东' in platform:
+                text = generate_complaint_text_jd(shop, title, url, kw)
+            elif '天猫' in platform or '淘宝' in platform:
+                text = generate_complaint_text_tmall(shop, title, url, kw)
+            elif '拼多多' in platform:
+                text = generate_complaint_text_pdd(shop, title, url, kw)
+            else:
+                text = generate_complaint_text_tmall(shop, title, url, kw)
+
+            c_text = ws_txt.cell(row=i, column=1, value=text)
+            c_text.alignment = Alignment(wrap_text=True, vertical="top")
+            c_text.font = Font(size=9)
+            ws_txt.row_dimensions[i].height = 320
+
+            c_plat = ws_txt.cell(row=i, column=2, value=platform)
+            c_plat.alignment = Alignment(horizontal="center", vertical="top")
+            c_plat.fill = PatternFill(
+                start_color="FFEEEE" if "是" in matched else "EEFFEE",
+                end_color="FFEEEE" if "是" in matched else "EEFFEE",
+                fill_type="solid"
+            )
+            c_plat.font = Font(bold=True, size=9)
+
+        # === Sheet 4: 材料清单 ===
+        ws_check = wb.create_sheet("材料准备清单")
+        ws_check.column_dimensions['A'].width = 35
+        ws_check.column_dimensions['B'].width = 30
+        ws_check.column_dimensions['C'].width = 40
+
+        ws_check.merge_cells('A1:C1')
+        c = ws_check['A1']
+        c.value = "IPP 投诉材料准备清单"
+        c.fill = PatternFill(start_color="1565C0", end_color="1565C0", fill_type="solid")
+        c.font = Font(bold=True, color="FFFFFF", size=13)
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        ws_check.row_dimensions[1].height = 30
+
+        checklist = [
+            ("【必须材料】", "", ""),
+            ("1. 营业执照 / 身份证", "必填", "拍照或扫描，清晰可读"),
+            ("2. 商标注册证", "必填", "WOW English 相关商标注册证扫描件"),
+            ("3. 著作权登记证书", "如有", "如已完成著作权登记"),
+            ("4. 侵权截图证据", "自动生成", "见各商品文件夹下的 screenshot.png"),
+            ("5. 侵权对比图", "建议上传", "见各商品文件夹下的 侵权对比图_XXX.png"),
+            ("", "", ""),
+            ("【自动生成材料】", "", ""),
+            ("6. 投诉商品列表", "已生成", "见「涉嫌侵权商品列表」工作表"),
+            ("7. 投诉理由文本", "已生成", "见「投诉理由(直接复制)」工作表"),
+            ("8. 侵权商品截图", "已生成", "每个商品文件夹中"),
+            ("", "", ""),
+            ("【上传顺序建议】", "", ""),
+            ("Step 1", "上传权利证明", "营业执照+商标注册证"),
+            ("Step 2", "填写投诉信息", "链接+侵权类型"),
+            ("Step 3", "粘贴投诉理由", "从「投诉理由」Sheet 复制"),
+            ("Step 4", "上传截图证据", "每个商品上传对应截图"),
+            ("Step 5", "提交投诉", "确认后提交"),
+        ]
+
+        row = 2
+        for item, status, note in checklist:
+            is_section = status == ""
+            if is_section:
+                ws_check.merge_cells(f'A{row}:C{row}')
+                c = ws_check.cell(row=row, column=1, value=item)
+                c.fill = PatternFill(start_color="E3F2FD", end_color="E3F2FD", fill_type="solid")
+                c.font = Font(bold=True, size=10)
+                c.alignment = Alignment(horizontal="left", vertical="center")
+                ws_check.row_dimensions[row].height = 22
+            else:
+                c_item = ws_check.cell(row=row, column=1, value=item)
+                c_item.alignment = Alignment(horizontal="left", vertical="center")
+                c_item.font = Font(size=10)
+
+                status_color = "92D050" if status in ("必填", "已生成", "自动生成") else (
+                    "FFF9E6" if status == "建议上传" else "FFF9E6")
+                c_status = ws_check.cell(row=row, column=2, value=status)
+                c_status.fill = PatternFill(start_color=status_color, end_color=status_color, fill_type="solid")
+                c_status.font = Font(bold=True, size=10)
+                c_status.alignment = Alignment(horizontal="center", vertical="center")
+
+                c_note = ws_check.cell(row=row, column=3, value=note)
+                c_note.font = Font(size=9, color="666666")
+                c_note.alignment = Alignment(horizontal="left", vertical="center")
+                ws_check.row_dimensions[row].height = 20
+            row += 1
+
+        date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = os.path.join(self.save_dir, f"IPP完整材料包_{date_str}.xlsx")
         wb.save(filename)
         return filename
 
@@ -680,6 +1148,13 @@ def process_single_url(browser, url: str, batch_dir: str, idx: int, total: int) 
         data['screenshot_path'] = screenshot_path
         data['save_dir'] = save_dir
 
+        # 生成侵权对比图
+        shop_for_comparison = data.get('shop_name', '') or '未知店铺'
+        comparison_path = generate_comparison_image(screenshot_path, shop_for_comparison, save_dir, idx)
+        if comparison_path:
+            data['comparison_image'] = comparison_path
+            print(f"  [📸] 侵权对比图已生成")
+
         # 关闭
         try:
             ctx.browser.close()
@@ -772,7 +1247,7 @@ def main():
                 "screenshot_path": "", "save_dir": batch_dir
             })
 
-    # 生成 IPP 文档
+        # 生成 IPP 文档
     print(f"\n\n{'='*60}")
     print("[📄] 生成 IPP 投诉文档...")
 
@@ -786,6 +1261,10 @@ def main():
 
     summary_file = generator.generate_batch_summary()
     print(f"  ✅ {summary_file}")
+
+    # 新增：IPP 完整材料包（含表单+理由+清单）
+    ipp_form_file = generator.generate_ipp_form()
+    print(f"  ✅ {ipp_form_file}")
 
     # 统计
     total = len(results)
@@ -805,16 +1284,33 @@ def main():
 【输出目录】
   {batch_dir}
 
-【IPP 投诉文档使用方式】
-  1. 打开「IPP投诉文档_*.xlsx」
-  2. 复制对应单元格内容到 IPP 平台表单
-  3. 截图证据在对应编号的子文件夹中
-  4. TXT 文件可直接全选复制到投诉理由文本框
+【输出文件说明】
+  📋 IPP完整材料包_*.xlsx → ⭐推荐使用！包含：
+     · Sheet1: 京东IP投诉表单（预填充）
+     · Sheet2: 淘天IPP投诉表单（预填充）
+     · Sheet3: 投诉理由（直接复制粘贴）
+     · Sheet4: 材料准备清单
 
-【文件说明】
-  📊 IPP投诉文档_*.xlsx  → IPP 平台表单（主要使用这个）
-  📄 IPP投诉文档_*.txt   → 投诉理由模板（可直接粘贴）
-  📈 批量处理汇总_*.xlsx → 处理结果总览表
+  📊 IPP投诉文档_*.xlsx   → 简洁版投诉列表
+  📄 IPP投诉文档_*.txt    → 纯文本投诉理由
+  📈 批量处理汇总_*.xlsx  → 处理结果总览（侵权标红）
+
+【IPP 投诉操作步骤】
+  1. 打开「IPP完整材料包_*.xlsx」
+  2. Sheet4「材料准备清单」→ 确认您已有权利证明文件
+  3. 登录京东 ipr.jd.com 或淘天 ipp.alibabagroup.com
+  4. 上传权利证明（营业执照+商标注册证），只需上传一次
+  5. Sheet3「投诉理由」→ 全选复制 → 粘贴到投诉表单
+  6. 逐个填写侵权链接（从 Sheet1/Sheet2 的商品列表复制）
+  7. 上传截图证据（每个商品文件夹下的 screenshot.png）
+  8. 提交投诉！
+
+【材料清单】
+  ✅ 权利证明（营业执照+商标注册证）- 您准备
+  ✅ 侵权截图 - 已自动生成（每个商品文件夹）
+  ✅ 侵权对比图 - 已自动生成（标注侵权区域）
+  ✅ 投诉理由 - 已自动生成（Sheet3 直接复制）
+  ✅ 投诉表单 - 已预填充（Sheet1/Sheet2）
 """)
 
 
