@@ -1,0 +1,20 @@
+# 依赖（仅供参考，实际通过 pip 安装）
+# pip install playwright openpyxl easyocr pillow
+
+# 输出目录 - 不上传
+output/
+
+# 浏览器 cookie - 不上传
+*_cookies.json
+chrome-debug/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
